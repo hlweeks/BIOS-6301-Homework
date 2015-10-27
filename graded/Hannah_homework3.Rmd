@@ -1,0 +1,220 @@
+---
+title: 'Bios 6301: Assignment 3'
+author: Hannah Weeks
+output: pdf_document
+---
+
+*Due Thursday, 08 October, 1:00 PM*
+
+50 points total.
+
+$5^{n=day}$ points taken off for each day late.
+
+This assigment includes turning in the first two assignments. All three should
+include knitr files (named `homework1.rmd`, `homework2.rmd`, `homework3.rmd`)
+along with valid PDF output files. Inside each file, clearly indicate which
+parts of your responses go with which problems (you may use the original homework
+document as a template). Add your name as `author` to the file's metadata section.
+Raw R code/output or word processor files are not acceptable.
+
+Failure to properly name files or include author name may result in 5 points taken off.
+
+### Question 1 ###
+
+**10 points**
+
+1. Use GitHub to turn in the first three homework assignments. Make sure the teacher (couthcommander) and TA (trippcm) are collaborators. (5 points)
+
+2. Commit each assignment individually.  This means your repository should have at least three commits. (5 points)
+
+### Question 2 ###
+
+**15 points**
+
+Write a simulation to calculate the power for the following study
+design.  The study has two variables, treatment group and outcome.
+There are two treatment groups (0, 1) and they should be assigned
+randomly with equal probability.  The outcome should be a random normal
+variable with a mean of 60 and standard deviation of 20.  If a patient
+is in the treatment group, add 5 to the outcome.  5 is the true
+treatment effect.  Create a linear of model for the outcome by the
+treatment group, and extract the p-value (hint: see assigment1).
+Test if the p-value is less than or equal to the alpha level, which
+should be set to 0.05.
+
+```{r}
+#Function to be used for determining p-values
+power.sim <- function(sampleSize, alpha = .05){
+  #Create vector of random 1s and 0s to assign subjects to treatment or control, respectively
+  assignment <- rbinom(n = sampleSize, size = 1, prob = .5)
+  #Define outcome
+  outcome <- rnorm(n = sampleSize, mean = 60, sd = 20)
+  #Define treatment effect
+  treatmentOutcome <- outcome + 5
+  #If subject in treatment group, update outcome to include treatment effect
+  outcomeEffects <- treatmentOutcome*assignment + outcome*(1-assignment)
+  #Create linear model comparing outcome effects based on treatment group
+  model <- lm(outcomeEffects ~ assignment)
+  #Extract p-values
+  pval <- summary(model)$coefficients[2,4]
+  return(pval)
+}
+```
+
+Repeat this procedure 1000 times. The power is calculated by finding
+the percentage of times the p-value is less than or equal to the alpha
+level.  Use the `set.seed` command so that the professor can reproduce
+your results.
+
+
+1. Find the power when the sample size is 100 patients. (10 points)
+```{r}
+#Set seed for replication of results
+set.seed(5)
+
+nSims <- 1000
+alpha <- .05
+sig.exp <- rep(NA, nSims)
+
+#Run simulation 1000 times for n = 100
+for(i in 1:nSims){
+  #Enter T (or F) for that exp being significant if p-value is less than alpha (or not)
+  sig.exp[i] <- (power.sim(sampleSize = 100) < alpha)
+}
+#Determine average number of significant experiments
+power <- mean(sig.exp)
+power
+```
+
+1. Find the power when the sample size is 1000 patients. (5 points)
+```{r}
+#Set seed for replication of results
+set.seed(5)
+
+nSims <- 1000
+alpha <- .05
+sig.exp <- rep(NA, nSims)
+
+#Run simulation 1000 times for n = 1000
+for(i in 1:nSims){
+  #Enter T (or F) for that exp being significant if p-value is less than alpha (or not)
+  sig.exp[i] <- (power.sim(sampleSize = 1000) < alpha)
+}
+#Determine average number of significant experiments
+power <- mean(sig.exp)
+power
+```
+
+### Question 3 ###
+
+**15 points**
+
+Obtain a copy of the [football-values lecture](https://github.com/couthcommander/football-values).
+Save the `2015/proj_rb15.csv` file in your working directory.  Read
+in the data set and remove the first two columns.
+
+```{r}
+setwd("~/Documents/BIOS 6301/Homework")
+rb <- read.csv("proj_rb15.csv")
+#See what first two columns are
+head(rb)
+names(rb)
+
+#Remove those columns
+rb$PlayerName <- NULL
+rb$Team <- NULL
+
+#Check to make sure those columns are gone
+head(rb)
+names(rb)
+```
+
+
+1. Show the correlation matrix of this data set. (3 points)
+```{r}
+(cor.rb <- cor(rb))
+```
+
+
+2. Generate a data set with 30 rows that has a similar correlation
+structure.  Repeat the procedure 10,000 times and return the mean
+correlation matrix. (10 points)
+
+```{r}
+library(MASS)
+
+#Generate data set with 30 rows
+rb.sim <- mvrnorm(30, mu = colMeans(rb), Sigma = var(rb))
+#Correlation matrix for single iteration of simulated data
+cor.sim <- cor(rb.sim)
+```  
+
+Now repeat the above procedure 10,000 times to obtain a mean correlation matrix:
+```{r}
+corMatrix <- 0
+nsims <- 10000
+#Create 10,000 similar correlation matricies and add them together
+for(i in seq(nsims)){
+  rb.sim <- mvrnorm(30, mu = colMeans(rb), Sigma = var(rb))
+  corMatrix <- corMatrix + cor(rb.sim)
+}
+#Create average correlation matrix
+meanMatrix <- corMatrix/nsims
+meanMatrix
+```
+
+
+3. Generate a data set with 30 rows that has the exact correlation
+structure as the original data set. (2 points)
+
+To obtain a data set with the *exact* correlation structure, we are set `empirical=TRUE` in the `mvrnorm()` function. Becuase we are specifying mu and sigma to align with the empirical correlation matrix, it isn't necessary to run this 10,000 times. A single run will produce the desired result:
+```{r}
+rb.sim <- mvrnorm(30, mu = colMeans(rb), Sigma = var(rb), empirical=TRUE)
+exactMatrix <- cor(rb.sim)
+exactMatrix
+```
+
+
+
+### Question 4 ###
+
+**10 points**
+
+Use \LaTeX to create the following expressions.
+
+1. Hint: `\Rightarrow` (4 points)
+
+    ![equation1](eq1.png)
+
+\huge
+\begin{align*}
+P(B)&=\sum_{j}P(B|A_{j})P(A_{j}),\\
+&\Rightarrow P(A_{i}|B)=\frac{P(B|A_{i})P(A_{i})}{\sum_{j}P(B|A_{j})P(A_{j})}\\
+\end{align*}
+
+
+2. Hint: `\zeta` (3 points)
+
+    ![equation2](eq2.png)
+
+\huge
+\begin{equation*}    
+\hat{f}(\zeta) = \int_{-\infty}^{\infty} f(x)e^{-2\pi ix \zeta}dx
+\end{equation*}
+
+3. Hint: `\partial` (3 points)
+
+    ![equation3](eq3.png)
+    
+\huge
+\begin{equation*}
+\textbf{J} = \frac{d\textbf{f}}{d\textbf{x}} = 
+\left[\frac{\partial \textbf{f}}{\partial{x_{1}}} \cdots \frac{\partial \textbf{f}}{\partial{x_{n}}}\right] = 
+\left[ \begin{matrix} \frac{\partial {f_{1}}}{\partial{x_{1}}} \cdots \frac{\partial {f_{1}}}{\partial{x_{n}}} \\
+\vdots \hfil \ddots \hfil \vdots \\
+\frac{\partial {f_{m}}}{\partial{x_{1}}} \cdots \frac{\partial {f_{m}}}{\partial{x_{n}}} \end{matrix} \right]
+\end{equation*}
+
+
+### Notes/Grade
+50/50 points
