@@ -1,0 +1,383 @@
+---
+title: 'Bios 6301: Assignment 5'  
+author: 'Hannah Weeks'
+output: pdf_document
+---
+
+*Due Tuesday, 10 November, 1:00 PM*
+
+$5^{n=day}$ points taken off for each day late.
+
+50 points total.
+
+Submit a single knitr file (named `homework5.rmd`), along with a valid PDF output file. Inside the file, clearly indicate which parts of your responses go with which problems (you may use the original homework document as a template). Add your name as `author` to the file's metadata section. Raw R code/output or word processor files are not acceptable.
+
+Failure to name file `homework5.rmd` or include author name may result in 5 points taken off.
+
+### Question 1 ###
+
+**24 points**
+
+Import the HAART dataset (`haart.csv`) from the GitHub repository into R, and perform the following manipulations: (4 points each)
+
+```{r}
+#Load in data and lubridate package
+setwd("~/Documents/BIOS 6301/Homework")
+library(lubridate)
+
+haart <- read.csv('haart.csv', header=TRUE)
+head(haart)
+```
+
+
+1. Convert date columns into a usable (for analysis) format.  Use the `table` command to display the counts of the year from `init.date`.
+
+```{r}
+names(haart)
+```
+The columns containing dates that must be reformatted are `init.date`, `last.visit`, and `date.death`.
+```{r}
+haart[,'init.date'] <- as.Date(haart[,'init.date'], format="%m/%d/%y")
+haart[,'last.visit'] <- as.Date(haart[,'last.visit'], format="%m/%d/%y")
+haart[,'date.death'] <- as.Date(haart[,'date.death'], format="%m/%d/%y")
+#Display first few rows to make sure changes were made correctly
+head(haart)
+class(haart[,'init.date'])
+```
+
+Now, display the counts by year for `init.date`.
+```{r}
+#Using lubridate
+table(year(haart[,'init.date']))
+
+#Alternatively, could use format function
+#table(format(haart[,'init.date'], '%Y'))
+```
+
+
+
+2. Create an indicator variable (one which takes the values 0 or 1 only) to represent death within 1 year of the initial visit.  How many observations died in year 1?
+
+Here, we specify 365 days from the initial date to be the one year followup period.
+```{r}
+deathOneYear <- numeric(length=nrow(haart))
+for(i in 1:nrow(haart)){
+  x <- difftime(haart[i,'date.death'], haart[i,'init.date'], units='days')
+  ifelse(x <= 365, deathOneYear[i] <- 1, deathOneYear[i] <- 0)
+}
+haart[,'deathInOneYear'] <- deathOneYear 
+
+sum(deathOneYear)
+```
+So there were 92 deaths within the first year.
+
+
+3. Use the `init.date`, `last.visit` and `death.date` columns to calculate a followup time (in days), which is the difference between the first and either the last visit or a death event (whichever comes first). If these times are longer than 1 year, censor them (this means if the value is above 365, set followup to 365).  Print the quantile for this new variable.
+
+A note on the "whichever comes first" requirement: If the patient died and has a death date, that patient cannot have a last visit *after* their date of death. So, if they died, then I looked to see if a last visit date was entered earlier than th.
+```{r}
+followup <- numeric(length=nrow(haart))
+
+#Run for each patient record
+for(i in 1:nrow(haart)){
+  #If patient is dead and last.visit date is missing...
+  if(haart[i,'death'] == 1 & is.na(haart[i,'last.visit'])){
+    #...define followup using death date
+    followup[i] <- difftime(haart[i,'date.death'], haart[i,'init.date'], units='days')
+  #If patient is dead and last.visit date is not missing...  
+  } else if(haart[i,'death'] == 1 & !is.na(haart[i,'last.visit'])){
+    #...define followup using the earlier of the two dates
+    minimum <- min(haart[i,'date.death'],haart[i,'last.visit'])
+    followup[i] <- difftime(minimum, haart[i,'init.date'], units='days')
+  #If patient is not known to be dead...
+  } else if(haart[i, 'death'] == 0){
+    #...define followup using last.visit date
+    followup[i] <- difftime(haart[i,'last.visit'], haart[i,'init.date'], units='days')
+  }
+  #Censor any followup times beyond one year
+  if(followup[i] > 365) followup[i] <- 365
+}
+#Add new variable to the data 
+haart[,'followup.days'] <- followup
+
+quantile(followup)
+```
+
+
+4. Create another indicator variable representing loss to followup; this means the observation is not known to be dead but does not have any followup visits after the first year.  How many records are lost-to-followup?
+
+
+```{r}
+#Initialize with 1's, then correct records that have known outcomes (i.e. not lost to followup)
+lossToFollowup <- rep(1, length=nrow(haart))
+
+#Run for each patient record
+for(i in 1:nrow(haart)){
+  #If patient is dead, they are not lost to followup
+  if(haart[i,'death'] == 1) lossToFollowup[i] <- 0
+  #If patient's last.visit date is not missing
+  else if(!is.na(haart[i,'last.visit'])){
+    #Determine days between init.date and last.visit
+    x <- difftime(haart[i,'last.visit'], haart[i,'init.date'], units = 'days')
+    #If last.visit is later than one year of init.date, patient is not lost to followup
+    if(x > 365) lossToFollowup[i] <- 0
+  }
+}
+#Add to data
+haart[,'loss.to.followup'] <- lossToFollowup
+
+sum(lossToFollowup)
+```
+So 173 records were lost to followup.
+
+5. Recall our work in class, which separated the `init.reg` field into a set of indicator variables, one for each unique drug. Create these fields and append them to the database as new columns.  Which drug regimen are found over 100 times?
+
+```{r}
+#Code from class
+#List drug regimen for each patient
+reg_list <- strsplit(as.character(haart[,'init.reg']), ',')
+#Create unique list of all drugs used
+all_drugs <- unique(unlist(reg_list))
+#Initialize empty matrix for each patient and drug
+reg_drugs <- matrix(nrow=nrow(haart), ncol=length(all_drugs))
+
+#Fill in matrix with a 1 if that drug was used for that patient, and a 0 otherwise
+for(i in seq_along(all_drugs)){
+  #'+' makes this list 1/0 instead of T/F
+  reg_drugs[,i] <- +sapply(reg_list, function(x) all_drugs[i] %in% x)
+}
+colnames(reg_drugs) <- all_drugs
+#Add to data
+haart <- cbind(haart, reg_drugs)
+```
+
+```{r}
+drug.totals <- numeric(length=length(colnames(reg_drugs)))
+names(drug.totals) <- colnames(reg_drugs)
+
+#For each of the drugs, sum to get total number of patients prescribed that medicine
+for(i in 1:ncol(reg_drugs)){
+  drug.totals[i] <- sum(reg_drugs[,i])
+  #If drug was used more than 100 times, print the drug name
+  if(drug.totals[i] > 100) print(names(drug.totals[i]))
+}
+```
+
+6. The dataset `haart2.csv` contains a few additional observations for the same study. Import these and append them to your master dataset (if you were smart about how you coded the previous steps, cleaning the additional observations should be easy!).  Show the first five records and the last five records of the complete (and clean) data set.  
+
+To add these to the existing haart data, we clean up haart2 by repeating the steps taken above for questions 1.1-1.5.
+```{r}
+haart2 <- read.csv("haart2.csv", header=TRUE)
+
+#Fix dates
+haart2[,'init.date'] <- as.Date(haart2[,'init.date'], format="%m/%d/%y")
+haart2[,'last.visit'] <- as.Date(haart2[,'last.visit'], format="%m/%d/%y")
+haart2[,'date.death'] <- as.Date(haart2[,'date.death'], format="%m/%d/%y")
+
+#Deaths in a year
+deathOneYear <- numeric(length=nrow(haart2))
+for(i in 1:nrow(haart2)){
+  x <- difftime(haart2[i,'date.death'], haart2[i,'init.date'], units='days')
+  ifelse(x <= 365, deathOneYear[i] <- 1, deathOneYear[i] <- 0)
+}
+haart2[,'deathInOneYear'] <- deathOneYear
+
+#Days to follow up
+followup <- numeric(length=nrow(haart2))
+for(i in 1:nrow(haart2)){
+  if(haart2[i,'death'] == 1 & is.na(haart2[i,'last.visit'])){
+    followup[i] <- difftime(haart2[i,'date.death'], haart2[i,'init.date'], units='days')
+  } else if(haart2[i,'death'] == 1 & !is.na(haart2[i,'last.visit'])){
+    minimum <- min(haart2[i,'date.death'],haart2[i,'last.visit'])
+    followup[i] <- difftime(minimum, haart2[i,'init.date'], units='days')
+  } else if(haart2[i, 'death'] == 0){
+    followup[i] <- difftime(haart2[i,'last.visit'], haart2[i,'init.date'], units='days')
+  }
+  if(followup[i] > 365) followup[i] <- 365
+}
+haart2[,'followup.days'] <- followup
+
+#Determine records lost to follow up
+lossToFollowup <- rep(1, length=nrow(haart2))
+for(i in 1:nrow(haart2)){
+  if(haart2[i,'death'] == 1) lossToFollowup[i] <- 0
+  else if(is.na(haart2[i,'last.visit'])) lossToFollowup[i] <- 0
+  else if(!is.na(haart2[i,'last.visit'])){
+    x <- difftime(haart2[i,'last.visit'], haart2[i,'init.date'], units = 'days')
+    if(x > 365) lossToFollowup[i] <- 0
+  }
+}
+haart2[,'loss.to.followup'] <- lossToFollowup
+
+#Determine drugs used for each patient
+reg_list <- strsplit(as.character(haart2[,'init.reg']), ',')
+reg_drugs <- matrix(nrow=nrow(haart2), ncol=length(all_drugs))
+for(i in seq_along(all_drugs)){
+  #'+' makes this list 1/0 instead of T/F
+  reg_drugs[,i] <- +sapply(reg_list, function(x) all_drugs[i] %in% x)
+}
+colnames(reg_drugs) <- all_drugs
+haart2 <- cbind(haart2, reg_drugs)
+```
+
+```{r}
+#Combine two haart datasets
+haartMaster <- rbind(haart, haart2)
+#First five records
+head(haartMaster, 5)
+#Last five records
+tail(haartMaster, 5)
+```
+
+
+### Question 2 ###
+
+**10 points**
+
+Obtain the code for using Newton's Method to estimate logistic regression parameters (`logistic.r`) and modify it to predict `death` from `weight`, `hemoglobin` and `cd4baseline` in the HAART dataset. Use complete cases only. Report the estimates for each parameter, including the intercept.
+
+Note: The original script `logistic_debug.r` is in the exercises folder.  It needs modification, specifically, the logistic function should be defined:
+
+```{r}
+logistic <- function(x) 1 / (1 + exp(-x))
+```
+
+Using the modified logistic file:
+```{r}
+haart <- read.csv("haart.csv", header=TRUE)
+
+haart <- haart[,c('death', 'weight', 'hemoglobin', 'cd4baseline')]
+haart <- haart[complete.cases(haart),]
+
+haartDeath <- haart[,'death']
+haartFactors <- haart[,c('weight', 'hemoglobin', 'cd4baseline')]
+
+# Logistic function
+logistic <- function(x) 1 / (1 + exp(-x))
+
+x <- haartFactors
+y <- haartDeath
+
+
+estimate_logistic <- function(x, y, MAX_ITER=10) {
+
+    n <- dim(x)[1]
+    k <- dim(x)[2]
+
+    x <- as.matrix(cbind(rep(1, n), x))
+    y <- as.matrix(y)
+
+    # Initialize fitting parameters
+    theta <- rep(0, k+1)
+
+    J <- rep(0, MAX_ITER)
+
+    for (i in 1:MAX_ITER) {
+
+        # Calculate linear predictor
+        z <- x %*% theta
+        # Apply logit function
+        h <- logistic(z)
+
+        # Calculate gradient
+        grad <- t((1/n)*x) %*% as.matrix(h - y)
+        # Calculate Hessian
+        H <- t((1/n)*x) %*% diag(array(h)) %*% diag(array(1-h)) %*% x
+
+        # Calculate log likelihood
+        J[i] <- (1/n) %*% sum(-y * log(h) - (1-y) * log(1-h))
+
+        # Newton's method
+        theta <- theta - solve(H) %*% grad
+    }
+
+    return(theta)
+}
+
+estimate_logistic(x, y)
+```
+
+(Note that `rep(1,n)` represents the intercept).
+
+
+### Question 3 ###
+
+**14 points**
+
+Import the `addr.txt` file from the GitHub repository.  This file contains a listing of names and addresses (thanks google).  Parse each line to create a data.frame with the following columns: lastname, firstname, streetno, streetname, city, state, zip.  Keep middleinitials or abbreviated names in the firstname column.  Print out the entire data.frame.
+
+```{r}
+#Read in data
+data <- readLines("addr.txt")
+
+#Make each line a list
+all.data <- character(length=length(data))
+for(i in 1:length(data)){
+  #Data fields in file are split by two or more spaces
+  all.data[i] <- strsplit(data[i], split = "  +")
+}
+
+#Row-bind each line of data
+info <- do.call(rbind, all.data)
+
+
+#Split street address column into street number and street name
+#Append the split columns to the data frame
+library(stringr)
+info <- cbind(info, str_split_fixed(info[,3], " ", 2))
+
+#Drop the column containing the combined street information
+info <- info[,-3]
+#Reorder columns to match address format
+info <- info[,c(1,2,6,7,3,4,5)]
+#Label columns
+colnames(info) <- c("last.name", "first.name", "street.no", "street.name", "city", "state", "zip")
+
+info
+```
+
+
+### Question 4 ###
+
+**2 points**
+
+The first argument to most functions that fit linear models are formulas.  The following example defines the response variable `death` and allows the model to incorporate all other variables as terms. `.` is used to mean all columns not otherwise in the formula.
+
+```{r}
+url <- "https://github.com/fonnesbeck/Bios6301/raw/master/datasets/haart.csv"
+haart_df <- read.csv(url)[,c('death','weight','hemoglobin','cd4baseline')]
+coef(summary(glm(death ~ ., data=haart_df, family=binomial(logit))))
+```
+
+Now imagine running the above several times, but with a different response and data set each time.  Here's a function:
+
+```{r}
+myfun <- function(dat, response) {
+  form <- as.formula(response ~ .)
+  coef(summary(glm(form, data=dat, family=binomial(logit))))
+}
+```
+
+Unfortunately, it doesn't work. `tryCatch` is "catching" the error so that this file can be knit to PDF.
+
+```{r}
+tryCatch(myfun(haart_df, death), error = function(e) e)
+```
+
+What do you think is going on?  Consider using `debug` to trace the problem.
+
+I think that the way `myfun` is written, it's not able to figure out how to interpret the `death` variable. Typically, when being passed to a model, the dataset from which the variable is drawn must be specified. In `myfun`, `death` is brought into the function a line before `haart` is. Since the function doesn't know what `death` corresponds to, it fails to evaluate `form` and subsequently `glm` correctly.
+
+**5 bonus points**
+
+Create a working function. 
+
+
+
+### Notes/Grade ###
+```{r}
+## Question 1,2,3,4: awesome!
+
+```
+
+50/50 points
